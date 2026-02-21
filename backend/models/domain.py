@@ -33,6 +33,7 @@ class Player(Base):
     name = Column(String, nullable=False)
     position = Column(String)
     jersey = Column(Integer)
+    photo_url = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Fixture(Base):

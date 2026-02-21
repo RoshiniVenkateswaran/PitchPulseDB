@@ -36,7 +36,8 @@ def sync_workspace_initial(workspace_id: str, use_demo: bool = True, db: Session
                 provider_player_id=p_data["provider_player_id"],
                 name=p_data["name"],
                 position=p_data.get("position"),
-                jersey=p_data.get("jersey")
+                jersey=p_data.get("jersey"),
+                photo_url=p_data.get("photo_url")
             )
             db.add(new_player)
             db.flush()  # get ID assigned

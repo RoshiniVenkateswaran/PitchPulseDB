@@ -84,6 +84,7 @@ class LiveFootballProvider(ProviderAdapter):
                     "name": p.get("name"),
                     "position": position,
                     "jersey": p.get("number"),
+                    "photo_url": p.get("photo"),
                 })
         logger.info(f"Fetched {len(players)} players for team {team_id} from API-Football")
         return players

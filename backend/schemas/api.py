@@ -17,6 +17,7 @@ class PlayerBase(BaseModel):
     name: str
     position: Optional[str]
     jersey: Optional[int]
+    photo_url: Optional[str] = None
     class Config:
         from_attributes = True
 
