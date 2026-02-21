@@ -1,0 +1,29 @@
+[
+    {
+        "provider_player_id": 100,
+        "minutes": 90,
+        "stats_json": {
+            "distance_km": 11.2,
+            "sprints": 25,
+            "high_speed_running_m": 1200
+        }
+    },
+    {
+        "provider_player_id": 101,
+        "minutes": 90,
+        "stats_json": {
+            "distance_km": 12.1,
+            "sprints": 18,
+            "high_speed_running_m": 850
+        }
+    },
+    {
+        "provider_player_id": 102,
+        "minutes": 90,
+        "stats_json": {
+            "distance_km": 4.5,
+            "sprints": 2,
+            "high_speed_running_m": 50
+        }
+    }
+]

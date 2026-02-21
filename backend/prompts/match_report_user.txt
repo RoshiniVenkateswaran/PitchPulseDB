@@ -1,0 +1,3 @@
+Analyze the following match data and generate the requested JSON Match Report:
+
+{context}

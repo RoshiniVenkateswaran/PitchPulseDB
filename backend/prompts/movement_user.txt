@@ -1,0 +1,1 @@
+Analyze the provided video clip of the athlete's movement and provide the required structured JSON assessment.

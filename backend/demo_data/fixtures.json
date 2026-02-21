@@ -1,0 +1,20 @@
+[
+    {
+        "provider_fixture_id": 1001,
+        "kickoff": "2023-10-20T14:00:00Z",
+        "opponent_name": "Sevilla",
+        "home_away": "away",
+        "status": "FT",
+        "score_home": 1,
+        "score_away": 1
+    },
+    {
+        "provider_fixture_id": 1002,
+        "kickoff": "2023-10-28T14:15:00Z",
+        "opponent_name": "Barcelona",
+        "home_away": "away",
+        "status": "NS",
+        "score_home": null,
+        "score_away": null
+    }
+]

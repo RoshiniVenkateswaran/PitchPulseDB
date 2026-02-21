@@ -1,0 +1,20 @@
+[
+    {
+        "provider_player_id": 100,
+        "name": "Vinicius Junior",
+        "position": "Attacker",
+        "jersey": 7
+    },
+    {
+        "provider_player_id": 101,
+        "name": "Jude Bellingham",
+        "position": "Midfielder",
+        "jersey": 5
+    },
+    {
+        "provider_player_id": 102,
+        "name": "Thibaut Courtois",
+        "position": "Goalkeeper",
+        "jersey": 1
+    }
+]
