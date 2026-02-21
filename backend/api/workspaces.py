@@ -61,3 +61,49 @@ def get_home(workspace_id: str, current_user: User = Depends(get_current_user), 
         "recent_fixtures": recent_fixtures,
         "squad": squad_response
     }
+
+
+@router.post("/{workspace_id}/suggested-xi")
+def suggested_xi(workspace_id: str,
+                 body: dict,
+                 current_user: User = Depends(get_current_user),
+                 db: Session = Depends(get_db)):
+    """Generate AI-recommended Starting XI based on squad readiness and opponent."""
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    opponent = body.get("opponent", "Unknown")
+    match_context = body.get("match_context", "")
+
+    # If client sent available_squad, use it directly; otherwise build from DB
+    available_squad = body.get("available_squad")
+    if not available_squad:
+        players = db.query(Player).filter(Player.workspace_id == workspace_id).all()
+        available_squad = []
+        for p in players:
+            metric = db.query(WeeklyMetric).filter(
+                WeeklyMetric.player_id == p.id
+            ).order_by(WeeklyMetric.week_start.desc()).first()
+            available_squad.append({
+                "id": str(p.id),
+                "name": p.name,
+                "position": p.position or "Unknown",
+                "readiness": metric.readiness_score if metric else 50,
+                "form": "Good" if (metric and metric.readiness_score > 70) else "Average"
+            })
+
+    try:
+        from backend.ai.suggested_xi import generate_suggested_xi
+        result = generate_suggested_xi(opponent, match_context, available_squad)
+        return result
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Suggested XI failed: {e}")
+        return {
+            "best_formation": "4-3-3",
+            "tactical_analysis": "Default formation selected due to analysis unavailability.",
+            "starting_xi_ids": [str(s["id"]) for s in available_squad[:11]],
+            "bench_ids": [str(s["id"]) for s in available_squad[11:]],
+            "player_rationales": {}
+        }

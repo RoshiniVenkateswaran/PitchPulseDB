@@ -207,3 +207,46 @@ def movement_analysis(player_id: str,
         # Cleanup
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+@router.post("/{player_id}/presage_checkin")
+def presage_checkin(player_id: str,
+                    body: dict,
+                    current_user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    """Process Presage SDK vitals (selfie scan) and return readiness adjustment."""
+    player = db.query(Player).filter(Player.id == player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    metric = db.query(WeeklyMetric).filter(
+        WeeklyMetric.player_id == player_id
+    ).order_by(WeeklyMetric.week_start.desc()).first()
+
+    # Build player context
+    player_ctx = {
+        "name": player.name,
+        "position": player.position or "Unknown",
+        "risk_score": metric.risk_score if metric else 0,
+        "readiness_score": metric.readiness_score if metric else 0,
+        "acwr": metric.acwr if metric else 0,
+        "last_match_minutes": 90,
+        "baselines": {"resting_hr": 65, "hrv_baseline": 60}
+    }
+
+    vitals = body.get("vitals", {})
+
+    try:
+        from backend.ai.presage_readiness import process_presage_checkin
+        result = process_presage_checkin(player_ctx, vitals)
+        return result
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Presage check-in failed: {e}")
+        return {
+            "readiness_delta": 0,
+            "readiness_flag": "OK",
+            "emotional_state": "Unknown",
+            "contributing_factors": ["Analysis unavailable."],
+            "recommendation": "Unable to process vitals. Proceed with normal training."
+        }

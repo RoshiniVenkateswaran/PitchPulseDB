@@ -133,3 +133,45 @@ class SyncResponse(BaseModel):
     fixtures_synced: Optional[int] = 0
     fixtures_processed: Optional[int] = 0
     stats_ingested: Optional[int] = 0
+
+# --- Presage Check-in ---
+
+class PresageVitals(BaseModel):
+    pulse_rate: Optional[float] = None
+    hrv_ms: Optional[float] = None
+    breathing_rate: Optional[float] = None
+    stress_level: Optional[str] = None
+    focus: Optional[str] = None
+    valence: Optional[str] = None
+    confidence: Optional[float] = None
+
+class PresageCheckinRequest(BaseModel):
+    vitals: PresageVitals
+
+class PresageCheckinResponse(BaseModel):
+    readiness_delta: int
+    readiness_flag: str
+    emotional_state: str
+    contributing_factors: List[str]
+    recommendation: str
+
+# --- Suggested XI ---
+
+class SquadMemberInput(BaseModel):
+    id: str
+    name: str
+    position: str
+    readiness: float
+    form: str
+
+class SuggestedXIRequest(BaseModel):
+    opponent: str
+    match_context: str
+    available_squad: List[SquadMemberInput]
+
+class SuggestedXIResponse(BaseModel):
+    best_formation: str
+    tactical_analysis: str
+    starting_xi_ids: List[str]
+    bench_ids: List[str]
+    player_rationales: dict
