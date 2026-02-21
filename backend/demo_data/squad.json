@@ -1,20 +1,152 @@
 [
     {
         "provider_player_id": 100,
-        "name": "Vinicius Junior",
-        "position": "Attacker",
-        "jersey": 7
+        "name": "Thibaut Courtois",
+        "position": "Goalkeeper",
+        "jersey": 1
     },
     {
         "provider_player_id": 101,
+        "name": "Andriy Lunin",
+        "position": "Goalkeeper",
+        "jersey": 13
+    },
+    {
+        "provider_player_id": 102,
+        "name": "Dani Carvajal",
+        "position": "Defender",
+        "jersey": 2
+    },
+    {
+        "provider_player_id": 103,
+        "name": "Éder Militão",
+        "position": "Defender",
+        "jersey": 3
+    },
+    {
+        "provider_player_id": 104,
+        "name": "David Alaba",
+        "position": "Defender",
+        "jersey": 4
+    },
+    {
+        "provider_player_id": 105,
+        "name": "Ferland Mendy",
+        "position": "Defender",
+        "jersey": 23
+    },
+    {
+        "provider_player_id": 106,
+        "name": "Nacho Fernández",
+        "position": "Defender",
+        "jersey": 6
+    },
+    {
+        "provider_player_id": 107,
+        "name": "Antonio Rüdiger",
+        "position": "Defender",
+        "jersey": 22
+    },
+    {
+        "provider_player_id": 108,
+        "name": "Lucas Vázquez",
+        "position": "Defender",
+        "jersey": 17
+    },
+    {
+        "provider_player_id": 109,
+        "name": "Luka Modrić",
+        "position": "Midfielder",
+        "jersey": 10
+    },
+    {
+        "provider_player_id": 110,
+        "name": "Toni Kroos",
+        "position": "Midfielder",
+        "jersey": 8
+    },
+    {
+        "provider_player_id": 111,
+        "name": "Federico Valverde",
+        "position": "Midfielder",
+        "jersey": 15
+    },
+    {
+        "provider_player_id": 112,
+        "name": "Eduardo Camavinga",
+        "position": "Midfielder",
+        "jersey": 12
+    },
+    {
+        "provider_player_id": 113,
+        "name": "Aurélien Tchouaméni",
+        "position": "Midfielder",
+        "jersey": 18
+    },
+    {
+        "provider_player_id": 114,
+        "name": "Dani Ceballos",
+        "position": "Midfielder",
+        "jersey": 19
+    },
+    {
+        "provider_player_id": 115,
         "name": "Jude Bellingham",
         "position": "Midfielder",
         "jersey": 5
     },
     {
-        "provider_player_id": 102,
-        "name": "Thibaut Courtois",
+        "provider_player_id": 116,
+        "name": "Vinícius Júnior",
+        "position": "Forward",
+        "jersey": 7
+    },
+    {
+        "provider_player_id": 117,
+        "name": "Rodrygo Goes",
+        "position": "Forward",
+        "jersey": 11
+    },
+    {
+        "provider_player_id": 118,
+        "name": "Joselu",
+        "position": "Forward",
+        "jersey": 14
+    },
+    {
+        "provider_player_id": 119,
+        "name": "Brahim Díaz",
+        "position": "Forward",
+        "jersey": 21
+    },
+    {
+        "provider_player_id": 120,
+        "name": "Arda Güler",
+        "position": "Forward",
+        "jersey": 24
+    },
+    {
+        "provider_player_id": 121,
+        "name": "Kepa Arrizabalaga",
         "position": "Goalkeeper",
-        "jersey": 1
+        "jersey": 25
+    },
+    {
+        "provider_player_id": 122,
+        "name": "Fran García",
+        "position": "Defender",
+        "jersey": 20
+    },
+    {
+        "provider_player_id": 123,
+        "name": "Álvaro Odriozola",
+        "position": "Defender",
+        "jersey": 16
+    },
+    {
+        "provider_player_id": 124,
+        "name": "Kylian Mbappé",
+        "position": "Forward",
+        "jersey": 9
     }
 ]
