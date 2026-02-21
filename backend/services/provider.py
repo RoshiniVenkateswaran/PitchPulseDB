@@ -2,6 +2,19 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 import json
 import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Map of position codes from API-Football to readable strings
+POSITION_MAP = {
+    "G": "Goalkeeper",
+    "D": "Defender",
+    "M": "Midfielder",
+    "F": "Forward",
+    "A": "Forward",  # Attacker alias
+}
+
 
 class ProviderAdapter(ABC):
     @abstractmethod
@@ -20,9 +33,115 @@ class ProviderAdapter(ABC):
     def get_fixture_player_stats(self, fixture_id: int) -> List[Dict[str, Any]]:
         pass
 
+
+class LiveFootballProvider(ProviderAdapter):
+    """
+    Live provider that calls the API-Football v3 API.
+    Uses PROVIDER_API_KEY from settings.
+    """
+    BASE_URL = "https://v3.football.api-sports.io"
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.headers = {
+            "x-apisports-key": api_key,
+        }
+
+    def _get(self, endpoint: str, params: dict = None) -> dict:
+        import requests
+        url = f"{self.BASE_URL}/{endpoint}"
+        try:
+            response = requests.get(url, headers=self.headers, params=params, timeout=15)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"API-Football request failed [{endpoint}]: {e}")
+            return {}
+
+    def search_clubs(self, query: str) -> List[Dict[str, Any]]:
+        data = self._get("teams", {"search": query})
+        results = []
+        for item in data.get("response", []):
+            team = item.get("team", {})
+            results.append({
+                "provider_team_id": team.get("id"),
+                "name": team.get("name"),
+                "logo_url": team.get("logo"),
+                "country": item.get("venue", {}).get("country"),
+                "founded": team.get("founded"),
+            })
+        return results
+
+    def get_squad(self, team_id: int) -> List[Dict[str, Any]]:
+        data = self._get("players/squads", {"team": team_id})
+        players = []
+        for item in data.get("response", []):
+            for p in item.get("players", []):
+                # API-Football returns full position strings like "Goalkeeper", "Defender", etc.
+                position = p.get("position") or p.get("pos") or "Unknown"
+                players.append({
+                    "provider_player_id": p.get("id"),
+                    "name": p.get("name"),
+                    "position": position,
+                    "jersey": p.get("number"),
+                })
+        logger.info(f"Fetched {len(players)} players for team {team_id} from API-Football")
+        return players
+
+
+    def get_fixtures(self, team_id: int, from_date: str, to_date: str) -> List[Dict[str, Any]]:
+        data = self._get("fixtures", {
+            "team": team_id,
+            "from": from_date,
+            "to": to_date,
+        })
+        fixtures = []
+        for item in data.get("response", []):
+            fixture = item.get("fixture", {})
+            teams = item.get("teams", {})
+            goals = item.get("goals", {})
+            home_team = teams.get("home", {})
+            away_team = teams.get("away", {})
+            is_home = str(home_team.get("id")) == str(team_id)
+            opponent = away_team.get("name") if is_home else home_team.get("name")
+            fixtures.append({
+                "provider_fixture_id": fixture.get("id"),
+                "kickoff": fixture.get("date"),
+                "opponent_name": opponent,
+                "home_away": "home" if is_home else "away",
+                "status": fixture.get("status", {}).get("short", "NS"),
+                "score_home": goals.get("home"),
+                "score_away": goals.get("away"),
+            })
+        return fixtures
+
+    def get_fixture_player_stats(self, fixture_id: int) -> List[Dict[str, Any]]:
+        data = self._get("fixtures/players", {"fixture": fixture_id})
+        result = []
+        for team_data in data.get("response", []):
+            for p in team_data.get("players", []):
+                player = p.get("player", {})
+                stats_list = p.get("statistics", [{}])
+                stats = stats_list[0] if stats_list else {}
+                games = stats.get("games", {})
+                minutes = games.get("minutes") or 0
+                result.append({
+                    "provider_player_id": player.get("id"),
+                    "minutes": minutes,
+                    "stats_json": {
+                        "rating": games.get("rating"),
+                        "goals": stats.get("goals", {}).get("total") or 0,
+                        "assists": stats.get("goals", {}).get("assists") or 0,
+                        "passes": stats.get("passes", {}).get("total") or 0,
+                    }
+                })
+        return result
+
+
 class MockFootballProvider(ProviderAdapter):
     """
-    Mock provider that reads from local JSON files in backend/demo_data/
+    Fallback mock provider that reads from local JSON files in backend/demo_data/
+    Used when no PROVIDER_API_KEY is set.
     """
     def __init__(self):
         self.data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "demo_data")
@@ -31,16 +150,17 @@ class MockFootballProvider(ProviderAdapter):
         try:
             with open(os.path.join(self.data_dir, filename), "r") as f:
                 return json.load(f)
-        except Exception as e:
+        except Exception:
             return []
 
     def search_clubs(self, query: str) -> List[Dict[str, Any]]:
-        # For hackathon, just return Real Madrid if queried
         return [
             {
                 "provider_team_id": 541,
                 "name": "Real Madrid",
-                "logo_url": "https://media.api-sports.io/football/teams/541.png"
+                "logo_url": "https://media.api-sports.io/football/teams/541.png",
+                "country": "Spain",
+                "founded": 1902,
             }
         ]
 
@@ -53,5 +173,19 @@ class MockFootballProvider(ProviderAdapter):
     def get_fixture_player_stats(self, fixture_id: int) -> List[Dict[str, Any]]:
         return self._load_json(f"stats_{fixture_id}.json")
 
-# In a real app we'd load this via dependency injection based on config
-provider = MockFootballProvider()
+
+def _build_provider() -> ProviderAdapter:
+    """Return the live API-Football provider if key is available, else fall back to mock."""
+    try:
+        from backend.core.config import settings
+        if settings.PROVIDER_API_KEY and settings.PROVIDER_API_KEY not in ("demo-key", ""):
+            logger.info("Using Live API-Football provider")
+            return LiveFootballProvider(api_key=settings.PROVIDER_API_KEY)
+    except Exception as e:
+        logger.warning(f"Could not load settings for provider: {e}")
+    logger.info("Using MockFootballProvider (no live API key)")
+    return MockFootballProvider()
+
+
+# Singleton — used by all endpoints
+provider = _build_provider()
