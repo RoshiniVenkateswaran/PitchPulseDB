@@ -8,3 +8,4 @@ serviceAccountKey.json
 temp_uploads/
 PitchPulseDB.db
 *.log
+"Prithvi app/"
