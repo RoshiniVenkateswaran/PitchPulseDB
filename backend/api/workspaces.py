@@ -1,30 +1,66 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from backend.core.database import get_db
 from backend.core.security import get_current_user, User
 from backend.models.domain import Workspace, Player, Fixture, WeeklyMetric
 from backend.schemas.api import RequestAccessRequest, RequestAccessResponse, WorkspaceHomeResponse
+from backend.services.provider import provider
+from backend.services.metrics import compute_weekly_metrics, determine_risk, determine_readiness
 import datetime
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
+def _run_initial_sync(workspace_id: str, provider_team_id: int, db: Session):
+    """Fetch squad + fixtures immediately after workspace creation."""
+    try:
+        # Import sync logic inline to avoid circular imports
+        from backend.api.sync import sync_workspace_initial
+        sync_workspace_initial(workspace_id=workspace_id, use_demo=True, db=db)
+        logger.info(f"Auto-sync complete for workspace {workspace_id}")
+    except Exception as e:
+        logger.error(f"Auto-sync failed for workspace {workspace_id}: {e}")
+
+
 @router.post("/request_access", response_model=RequestAccessResponse)
-def request_access(req: RequestAccessRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Check if already exists
-    existing = db.query(Workspace).filter(Workspace.provider_team_id == req.provider_team_id).first()
+def request_access(req: RequestAccessRequest,
+                   background_tasks: BackgroundTasks,
+                   current_user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
+    """
+    Club selection: auto-approves workspace and immediately triggers data sync.
+    No admin approval needed.
+    """
+    # Check if this user already has a workspace for this team
+    existing = db.query(Workspace).filter(
+        Workspace.provider_team_id == req.provider_team_id,
+        Workspace.requested_by_user_id == current_user.id
+    ).first()
     if existing:
         return existing
-        
+
+    # Look up team name from the provider
+    search_results = provider.search_clubs(str(req.provider_team_id))
+    team_name = search_results[0]["name"] if search_results else f"Team {req.provider_team_id}"
+
+    # Create workspace already approved — no waiting
     ws = Workspace(
         provider_team_id=req.provider_team_id,
-        team_name="Requested Team", # ideally fetched from provider search
-        status="pending",
+        team_name=team_name,
+        status="approved",
         requested_by_user_id=current_user.id
     )
     db.add(ws)
     db.commit()
     db.refresh(ws)
+
+    # Trigger squad + fixtures sync in the background so the response is instant
+    background_tasks.add_task(_run_initial_sync, str(ws.id), req.provider_team_id, db)
+
     return ws
+
 
 @router.get("/{workspace_id}/home")
 def get_home(workspace_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
