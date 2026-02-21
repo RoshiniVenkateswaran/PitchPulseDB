@@ -1,0 +1,10 @@
+.env
+*.pyc
+__pycache__/
+.DS_Store
+venv/
+.venv/
+serviceAccountKey.json
+temp_uploads/
+PitchPulseDB.db
+*.log
