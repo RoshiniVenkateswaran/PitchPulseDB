@@ -151,24 +151,6 @@ else:
     logger.warning("No VECTOR_DB_URL provided, using LocalFallbackVectorStore")
     vector_db = LocalFallbackVectorStore()
 
-# Seed playbook docs for demo (these use mock embeddings since they're static text)
-vector_db.upsert(
-    doc_id="playbook_1",
-    text="When acute load spikes significantly (ACWR > 1.5), the player is in the danger zone. The recommendation is always to reduce training volume, avoid high-speed running drills, and potentially rest for the upcoming fixture.",
-    metadata={"source": "Medical Playbook", "topic": "ACWR Spikes"}
-)
-vector_db.upsert(
-    doc_id="playbook_2",
-    text="A low acute load (ACWR < 0.8) indicates the player is under-prepared. The action plan should gradually increase match load, starting with 45 minutes in lower stakes games before demanding full 90-minute performances.",
-    metadata={"source": "Medical Playbook", "topic": "Under-prepared"}
-)
-vector_db.upsert(
-    doc_id="playbook_3",
-    text="Winger Protocol: If Sprint Distance exceeds baseline by 20%+, limit subsequent Match Day -2 technical drills. Monitor hamstring tightness indicators pre and post session.",
-    metadata={"source": "Medical Playbook", "topic": "Winger Sprint Protocol"}
-)
-
-
 def get_embedding_safe(text: str) -> Optional[List[float]]:
     """
     Attempt to generate a real Gemini embedding via Keerthi's module.
@@ -182,3 +164,42 @@ def get_embedding_safe(text: str) -> Optional[List[float]]:
     except Exception as e:
         logger.warning(f"Real embedding failed, falling back to mock: {e}")
         return None
+
+# Seed playbook docs and historical cases for demo
+seed_file_path = os.path.join(os.path.dirname(__file__), "..", "ai", "knowledge_base_seed.json")
+try:
+    with open(seed_file_path, "r") as f:
+        seed_data = json.load(f)
+        
+    for rule in seed_data.get("playbook_rules", []):
+        text = rule.get("rule_text", "")
+        vector_db.upsert(
+            doc_id=rule.get("id"),
+            text=text,
+            embedding=get_embedding_safe(text),
+            metadata={"source": rule.get("source"), "topic": rule.get("topic")}
+        )
+        
+    for case in seed_data.get("historical_cases", []):
+        context_data = case.get("context_data", {})
+        # Merge source/topic into metadata along with context_data for simplicity
+        metadata = {**context_data, "source": case.get("source"), "topic": case.get("topic")}
+        
+        intervention = case.get("intervention", "")
+        outcome = case.get("outcome", "")
+        text_out = f"Intervention: {intervention} Outcome: {outcome}"
+        
+        # When embedding a historical case, the embedding string should include the context
+        # so similarity search on player context finds it.
+        embed_str = f"Context: {json.dumps(context_data)} {text_out}"
+        
+        vector_db.upsert(
+            doc_id=case.get("id"),
+            text=text_out,  # players.py uses text as 'outcome' (and intervention)
+            embedding=get_embedding_safe(embed_str),
+            metadata=metadata
+        )
+    logger.info("Successfully seeded Actian VectorAI using knowledge_base_seed.json")
+except Exception as e:
+    logger.error(f"Failed to seed vector DB from json: {e}")
+

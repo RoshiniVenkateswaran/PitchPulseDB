@@ -160,6 +160,18 @@ Calls Gemini with similar cases + playbook docs.
 }
 ```
 
+### `POST /players/{id}/movement_analysis`
+Accepts a video upload (`multipart/form-data` with `video` field).
+**Response (Strict JSON from Keerthi's Prompt):**
+```json
+{
+  "mechanical_risk_band": "MED",
+  "flags": ["Slight knee valgus on descent"],
+  "coaching_cues": ["Drive knees out over toes"],
+  "confidence": 0.85
+}
+```
+
 ## Internal / Sync Routes (Can use `?use_demo=true`)
 
 ### `POST /sync/workspace/{id}/initial`

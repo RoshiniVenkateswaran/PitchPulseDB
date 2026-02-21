@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+import shutil
+import os
 from sqlalchemy.orm import Session
 from backend.core.database import get_db
 from backend.core.config import settings
@@ -146,17 +148,18 @@ def action_plan(player_id: str,
     # Format retrieved cases for Keerthi's function signature
     retrieved_cases = []
     for doc in similar_docs:
-        retrieved_cases.append({
-            "context_data": doc.get("metadata", {}),
-            "outcome": doc.get("text", "")
-        })
+        if doc.get("metadata", {}).get("source") == "PitchPulse_CaseStudy":
+            retrieved_cases.append({
+                "context_data": doc.get("metadata", {}),
+                "outcome": doc.get("text", "")
+            })
 
     # Get playbook snippets from vector DB
     playbook_query = f"workload management {metric.risk_band} risk protocol"
     playbook_embedding = get_embedding_safe(playbook_query)
     playbook_docs = vector_db.search(query_text=playbook_query, query_embedding=playbook_embedding, k=2)
     retrieved_playbook = [doc.get("text", "") for doc in playbook_docs
-                          if doc.get("metadata", {}).get("source") == "Medical Playbook"]
+                          if doc.get("metadata", {}).get("source") == "PitchPulse_Playbook"]
 
     # Try Keerthi's real AI module; fall back to mock
     try:
@@ -169,3 +172,38 @@ def action_plan(player_id: str,
         logging.getLogger(__name__).warning(f"Real action plan failed, using mock: {e}")
 
     return generate_action_plan_mock(player.name, similar_docs)
+
+@router.post("/{player_id}/movement_analysis")
+def movement_analysis(player_id: str,
+                      video: UploadFile = File(...),
+                      current_user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    player = db.query(Player).filter(Player.id == player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    # Ensure uploads dir exists
+    upload_dir = os.path.join(settings.BASE_DIR if hasattr(settings, 'BASE_DIR') else "/tmp", "temp_uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    temp_path = os.path.join(upload_dir, f"{player_id}_{video.filename}")
+
+    try:
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(video.file, buffer)
+
+        from backend.ai.movement_analysis import analyze_movement
+        result = analyze_movement(temp_path, position=player.position)
+        return result
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Movement analysis failed: {e}")
+        return {
+            "mechanical_risk_band": "MED",
+            "flags": ["Analysis Failed/Incomplete"],
+            "coaching_cues": ["Unable to process video automatically."],
+            "confidence": 0.0
+        }
+    finally:
+        # Cleanup
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
