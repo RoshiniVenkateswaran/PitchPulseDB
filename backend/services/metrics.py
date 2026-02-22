@@ -69,3 +69,88 @@ def determine_risk(acwr: float, monotony: float, strain: float, days_since_match
 def determine_readiness(risk_score: float) -> float:
     # Inverse relationship for demo
     return max(0.0, 100.0 - risk_score)
+
+
+def compute_baseline_from_stats(total_minutes: int, appearances: int,
+                                 avg_rating: float = None, goals: int = 0,
+                                 assists: int = 0) -> tuple:
+    """
+    Compute baseline readiness and risk from real Football API season stats.
+    Returns (readiness_score, risk_score, risk_band, drivers_json).
+
+    Logic:
+    - High minutes + many appearances → higher fatigue risk, lower readiness
+    - High rating / goals / assists → form boost to readiness
+    - Few appearances → low workload but also lower match fitness
+    """
+    drivers = []
+
+    # ── Workload component (minutes per appearance) ──
+    if appearances > 0:
+        mins_per_app = total_minutes / appearances
+    else:
+        mins_per_app = 0
+
+    # Base risk from workload (higher minutes/game = more fatigue)
+    if mins_per_app >= 85:
+        workload_risk = 35  # heavy starter
+        drivers.append({"factor": "Heavy starter workload", "value": f"{mins_per_app:.0f} min/game",
+                        "threshold": "85", "impact": "negative"})
+    elif mins_per_app >= 60:
+        workload_risk = 20
+        drivers.append({"factor": "Moderate workload", "value": f"{mins_per_app:.0f} min/game",
+                        "threshold": "60", "impact": "neutral"})
+    elif appearances > 0:
+        workload_risk = 10
+        drivers.append({"factor": "Rotation / sub role", "value": f"{mins_per_app:.0f} min/game",
+                        "threshold": "60", "impact": "positive"})
+    else:
+        workload_risk = 15
+        drivers.append({"factor": "No appearances", "value": "0", "threshold": "N/A", "impact": "negative"})
+
+    # ── Volume component (total appearances in season) ──
+    if appearances >= 30:
+        volume_risk = 15
+        drivers.append({"factor": "High match volume", "value": str(appearances),
+                        "threshold": "30", "impact": "negative"})
+    elif appearances >= 15:
+        volume_risk = 5
+    else:
+        volume_risk = 0
+
+    # ── Form boost (reduces risk, increases readiness) ──
+    form_bonus = 0
+    if avg_rating and avg_rating > 0:
+        if avg_rating >= 7.5:
+            form_bonus = 15
+            drivers.append({"factor": "Excellent form", "value": f"{avg_rating:.1f} avg rating",
+                            "threshold": "7.5", "impact": "positive"})
+        elif avg_rating >= 7.0:
+            form_bonus = 8
+            drivers.append({"factor": "Good form", "value": f"{avg_rating:.1f} avg rating",
+                            "threshold": "7.0", "impact": "positive"})
+        elif avg_rating < 6.5:
+            form_bonus = -5
+            drivers.append({"factor": "Below-average form", "value": f"{avg_rating:.1f} avg rating",
+                            "threshold": "6.5", "impact": "negative"})
+
+    # Goal involvement bonus
+    goal_involvement = goals + assists
+    if goal_involvement >= 10:
+        form_bonus += 5
+    elif goal_involvement >= 5:
+        form_bonus += 2
+
+    # ── Final calculation ──
+    risk_score = max(5.0, min(80.0, float(workload_risk + volume_risk - form_bonus * 0.3)))
+    readiness_score = max(20.0, min(95.0, 100.0 - risk_score + form_bonus * 0.5))
+
+    if risk_score >= 50:
+        risk_band = "HIGH"
+    elif risk_score >= 25:
+        risk_band = "MED"
+    else:
+        risk_band = "LOW"
+
+    return readiness_score, risk_score, risk_band, drivers[:3]
+

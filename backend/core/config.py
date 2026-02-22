@@ -18,10 +18,6 @@ class Settings(BaseSettings):
     PROVIDER_API_KEY: Optional[str] = "demo-key"
     USE_DEMO_DATA: bool = True
     
-    # Vector DB Settings
-    VECTOR_DB_URL: Optional[str] = "http://localhost:8000/vector" # Adjust based on Actian connection
-    VECTOR_DB_TOKEN: Optional[str] = None
-    
     # Gemini AI Settings
     GEMINI_API_KEY: Optional[str] = None
 

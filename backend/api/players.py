@@ -1,15 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 import shutil
 import os
+import logging
 from sqlalchemy.orm import Session
 from backend.core.database import get_db
 from backend.core.config import settings
 from backend.core.security import get_current_user, User
 from backend.models.domain import Player, WeeklyMetric, Fixture, PlayerMatchStat
-from backend.services.vector_db import vector_db, get_embedding_safe
-from backend.ai.gemini_mock import generate_action_plan_mock
-from datetime import datetime, timedelta
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -21,6 +20,7 @@ def get_player_detail(player_id: str, weeks: int = 6,
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
 
+    from datetime import datetime, timedelta
     cutoff = datetime.utcnow() - timedelta(weeks=weeks)
     metrics = db.query(WeeklyMetric).filter(
         WeeklyMetric.player_id == player_id,
@@ -63,44 +63,6 @@ def get_player_why(player_id: str,
     return {"drivers": metric.drivers_json}
 
 
-@router.get("/{player_id}/similar_cases")
-def get_similar_cases(player_id: str, k: int = 5,
-                      current_user: User = Depends(get_current_user),
-                      db: Session = Depends(get_db)):
-    player = db.query(Player).filter(Player.id == player_id).first()
-    metric = db.query(WeeklyMetric).filter(
-        WeeklyMetric.player_id == player_id
-    ).order_by(WeeklyMetric.week_start.desc()).first()
-
-    if not player or not metric:
-        return {"cases": []}
-
-    # Build query text using Keerthi's canonical format if possible
-    driver_strings = [d.get("factor", "") for d in (metric.drivers_json or [])]
-    try:
-        from backend.ai.embeddings import create_player_week_document
-        query_text = create_player_week_document(
-            player_name=player.name,
-            week_start=metric.week_start.isoformat() if metric.week_start else "",
-            risk_score=metric.risk_score,
-            readiness=metric.readiness_score,
-            acwr=metric.acwr,
-            monotony=metric.monotony,
-            strain=metric.strain,
-            last_match_minutes=90,  # fallback
-            drivers=driver_strings,
-            recommended_action=f"Risk {metric.risk_band}"
-        )
-    except Exception:
-        query_text = f"Player {player.name} ACWR {metric.acwr:.2f} risk {metric.risk_band}"
-
-    # Get embedding for query
-    query_embedding = get_embedding_safe(query_text)
-
-    results = vector_db.search(query_text=query_text, query_embedding=query_embedding, k=k)
-    return {"cases": results}
-
-
 @router.post("/{player_id}/action_plan")
 def action_plan(player_id: str,
                 current_user: User = Depends(get_current_user),
@@ -114,6 +76,7 @@ def action_plan(player_id: str,
     ).order_by(WeeklyMetric.week_start.desc()).first()
 
     if not metric:
+        from backend.ai.gemini_mock import generate_action_plan_mock
         return generate_action_plan_mock(player.name, [])
 
     # Get last match stats
@@ -127,7 +90,7 @@ def action_plan(player_id: str,
         if last_stat.stats_json:
             last_match.update(last_stat.stats_json)
 
-    # Build player context for Keerthi's action_plan module
+    # Build player context — simple inputs for Gemini
     driver_strings = [d.get("factor", "") for d in (metric.drivers_json or [])]
     player_context = {
         "name": player.name,
@@ -140,38 +103,18 @@ def action_plan(player_id: str,
         "last_match": last_match
     }
 
-    # Get similar cases from Vector DB for RAG
-    query_text = f"Player {player.name} ACWR {metric.acwr:.2f} risk {metric.risk_band}"
-    query_embedding = get_embedding_safe(query_text)
-    similar_docs = vector_db.search(query_text=query_text, query_embedding=query_embedding, k=3)
-
-    # Format retrieved cases for Keerthi's function signature
-    retrieved_cases = []
-    for doc in similar_docs:
-        if doc.get("metadata", {}).get("source") == "PitchPulse_CaseStudy":
-            retrieved_cases.append({
-                "context_data": doc.get("metadata", {}),
-                "outcome": doc.get("text", "")
-            })
-
-    # Get playbook snippets from vector DB
-    playbook_query = f"workload management {metric.risk_band} risk protocol"
-    playbook_embedding = get_embedding_safe(playbook_query)
-    playbook_docs = vector_db.search(query_text=playbook_query, query_embedding=playbook_embedding, k=2)
-    retrieved_playbook = [doc.get("text", "") for doc in playbook_docs
-                          if doc.get("metadata", {}).get("source") == "PitchPulse_Playbook"]
-
-    # Try Keerthi's real AI module; fall back to mock
+    # Call Gemini directly with player context only (no RAG/Vector DB)
     try:
         if settings.GEMINI_API_KEY:
             from backend.ai.action_plan import generate_action_plan
-            plan = generate_action_plan(player_context, retrieved_cases, retrieved_playbook)
+            plan = generate_action_plan(player_context)
             return plan
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Real action plan failed, using mock: {e}")
+        logger.warning(f"Real action plan failed, using mock: {e}")
 
-    return generate_action_plan_mock(player.name, similar_docs)
+    from backend.ai.gemini_mock import generate_action_plan_mock
+    return generate_action_plan_mock(player.name, [])
+
 
 @router.post("/{player_id}/movement_analysis")
 def movement_analysis(player_id: str,
@@ -193,10 +136,20 @@ def movement_analysis(player_id: str,
 
         from backend.ai.movement_analysis import analyze_movement
         result = analyze_movement(temp_path, position=player.position)
+
+        # Persist risk band to DB if returned
+        if result.get("mechanical_risk_band"):
+            wm = db.query(WeeklyMetric).filter(
+                WeeklyMetric.player_id == player_id
+            ).order_by(WeeklyMetric.week_start.desc()).first()
+            if wm:
+                wm.risk_band = result["mechanical_risk_band"]
+                db.commit()
+                logger.info(f"Updated risk_band to {wm.risk_band} for player {player_id}")
+
         return result
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Movement analysis failed: {e}")
+        logger.error(f"Movement analysis failed: {e}")
         return {
             "mechanical_risk_band": "MED",
             "flags": ["Analysis Failed/Incomplete"],
@@ -207,6 +160,18 @@ def movement_analysis(player_id: str,
         # Cleanup
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+# Default "well-rested" vitals — used when the client sends empty/missing vitals
+_HEALTHY_DEFAULT_VITALS = {
+    "pulse_rate": 60,
+    "hrv_ms": 70,
+    "breathing_rate": 14,
+    "stress_level": "Normal",
+    "focus": "High",
+    "valence": "Positive",
+    "confidence": 0.9
+}
 
 
 @router.post("/{player_id}/presage_checkin")
@@ -234,15 +199,47 @@ def presage_checkin(player_id: str,
         "baselines": {"resting_hr": 65, "hrv_baseline": 60}
     }
 
+    # Use incoming vitals, or fall back to healthy defaults
     vitals = body.get("vitals", {})
+    print(f"[Presage RAW VITALS] Player={player.name} Vitals={vitals}", flush=True)
+
+    # ── Detect "No Face" ─────────────────────────────────────────────────────────
+    # Prithvi's app sends face_detected: True/False explicitly — trust it directly.
+    face_detected = vitals.get("face_detected", True)
+    if str(face_detected).lower() in ("false", "0", "no"):
+        print(f"[Presage] No face detected for {player.name} — returning ALERT", flush=True)
+        return {
+            "readiness_delta": 0,
+            "readiness_flag": "ALERT",
+            "emotional_state": "No face detected",
+            "contributing_factors": ["Scan failed to detect a human face."],
+            "recommendation": "Please ensure you are in a well-lit area and retake the scan."
+        }
+
+    if not vitals or not any(v for k, v in vitals.items() if k != "face_detected"):
+        print(f"[Presage] Empty vitals — using healthy defaults for {player.name}", flush=True)
+        vitals = _HEALTHY_DEFAULT_VITALS.copy()
 
     try:
         from backend.ai.presage_readiness import process_presage_checkin
         result = process_presage_checkin(player_ctx, vitals)
+
+
+
+
+        # ── Persist readiness delta to DB ──
+        if metric and result.get("readiness_delta") is not None:
+            delta = result["readiness_delta"]
+            new_readiness = max(0.0, min(100.0, metric.readiness_score + delta))
+            new_risk = max(0.0, 100.0 - new_readiness)
+            metric.readiness_score = new_readiness
+            metric.risk_score = new_risk
+            db.commit()
+            logger.info(f"[Presage] Updated DB for {player.name}: readiness {new_readiness:.1f} (delta {delta})")
+
         return result
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Presage check-in failed: {e}")
+        logger.error(f"Presage check-in failed: {e}")
         return {
             "readiness_delta": 0,
             "readiness_flag": "OK",

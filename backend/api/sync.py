@@ -9,8 +9,7 @@ from backend.core.config import settings
 from backend.models.domain import Workspace, Player, Fixture, PlayerMatchStat, DailyLoad, WeeklyMetric, MatchReport
 from backend.schemas.api import SyncResponse
 from backend.services.provider import provider
-from backend.services.metrics import calculate_match_load, compute_weekly_metrics, determine_risk, determine_readiness
-from backend.services.vector_db import vector_db, get_embedding_safe
+from backend.services.metrics import calculate_match_load, compute_weekly_metrics, determine_risk, determine_readiness, compute_baseline_from_stats
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,14 +41,31 @@ def sync_workspace_initial(workspace_id: str, use_demo: bool = True, db: Session
             db.add(new_player)
             db.flush()  # get ID assigned
 
-            # Init empty weekly metric
+            # ── Compute baseline readiness from real Football API season stats ──
+            try:
+                season_stats = provider.get_player_season_stats(
+                    p_data["provider_player_id"], season=2024
+                )
+                readiness, risk, risk_band, drivers = compute_baseline_from_stats(
+                    total_minutes=season_stats.get("total_minutes", 0),
+                    appearances=season_stats.get("appearances", 0),
+                    avg_rating=season_stats.get("avg_rating"),
+                    goals=season_stats.get("goals", 0),
+                    assists=season_stats.get("assists", 0),
+                )
+                logger.info(f"Baseline for {p_data['name']}: readiness={readiness:.1f}, risk={risk:.1f}, band={risk_band}")
+            except Exception as e:
+                logger.warning(f"Could not fetch season stats for {p_data['name']}, using defaults: {e}")
+                readiness, risk, risk_band = 70.0, 30.0, "LOW"
+                drivers = [{"factor": "Baseline (no stats)", "value": "N/A", "threshold": "N/A", "impact": "neutral"}]
+
             wm = WeeklyMetric(
                 player_id=new_player.id,
                 week_start=datetime.utcnow() - timedelta(days=datetime.utcnow().weekday()),
-                risk_score=20.0,
-                readiness_score=80.0,
-                risk_band="LOW",
-                drivers_json=[{"factor": "Baseline", "value": "N/A", "threshold": "N/A", "impact": "positive"}]
+                risk_score=risk,
+                readiness_score=readiness,
+                risk_band=risk_band,
+                drivers_json=drivers,
             )
             db.add(wm)
             players_added += 1
@@ -88,13 +104,12 @@ def sync_fixtures_poll(use_demo: bool = True, db: Session = Depends(get_db)):
       1. Computes match loads → daily_load
       2. Recomputes weekly_metrics for involved players
       3. Generates match report via Keerthi's AI module
-      4. Upserts player-week embeddings into VectorAI DB
     """
     fixtures = db.query(Fixture).filter(Fixture.status == "FT", Fixture.last_synced_at == None).all()
 
     fixtures_processed = 0
     stats_ingested = 0
-    player_stats_for_report = []  # Collect for match report generation
+    player_stats_for_report = []
 
     for fixture in fixtures:
         stats_data = provider.get_fixture_player_stats(fixture.provider_fixture_id)
@@ -160,35 +175,6 @@ def sync_fixtures_poll(use_demo: bool = True, db: Session = Depends(get_db)):
             wm.readiness_score = readiness
             wm.drivers_json = drivers
 
-            # --- VECTOR DB: Build canonical doc + embed + upsert ---
-            driver_strings = [d["factor"] for d in drivers]
-            try:
-                from backend.ai.embeddings import create_player_week_document
-                doc_text = create_player_week_document(
-                    player_name=player.name,
-                    week_start=week_start.isoformat(),
-                    risk_score=risk_score,
-                    readiness=readiness,
-                    acwr=acwr,
-                    monotony=monotony,
-                    strain=strain,
-                    last_match_minutes=s_data["minutes"],
-                    drivers=driver_strings,
-                    recommended_action=f"Risk {risk_band}: manage load accordingly."
-                )
-            except Exception:
-                doc_text = (f"{player.name} week {week_start.isoformat()} ACWR {acwr:.2f} "
-                            f"Risk {risk_band}. Drivers: {driver_strings}")
-
-            embedding = get_embedding_safe(doc_text)
-            doc_id = f"week_{player.id}_{week_start.isoformat()}"
-            vector_db.upsert(
-                doc_id=doc_id,
-                text=doc_text,
-                embedding=embedding,
-                metadata={"player_id": player.id, "week": week_start.isoformat(), "acwr": acwr}
-            )
-
             # Collect for match report
             load_flag = f"{'High' if risk_band == 'HIGH' else 'Normal'} (ACWR {acwr:.2f})"
             player_stats_for_report.append({
@@ -203,7 +189,7 @@ def sync_fixtures_poll(use_demo: bool = True, db: Session = Depends(get_db)):
             "result": f"{fixture.score_home} - {fixture.score_away}",
             "intensity_rating": "High"
         }
-        team_stats = {"total_distance_km": 110, "avg_possession": "52%"}  # mock team-level
+        team_stats = {"total_distance_km": 110, "avg_possession": "52%"}
 
         try:
             if settings.GEMINI_API_KEY:
@@ -229,16 +215,6 @@ def sync_fixtures_poll(use_demo: bool = True, db: Session = Depends(get_db)):
             report_json=report_json
         )
         db.add(mr)
-
-        # Upsert match report embedding too
-        report_text = json.dumps(report_json)
-        report_embedding = get_embedding_safe(report_text)
-        vector_db.upsert(
-            doc_id=f"match_report_{fixture.id}",
-            text=report_text,
-            embedding=report_embedding,
-            metadata={"fixture_id": fixture.id, "type": "match_report"}
-        )
 
         fixture.last_synced_at = datetime.utcnow()
         fixtures_processed += 1

@@ -125,12 +125,30 @@ def generate_json(system_prompt: str, user_prompt: str, model_name: str = "gemin
 
     raise ValueError(f"Failed to generate valid JSON after {max_retries + 1} attempts. Last error: {last_error}")
 
+def call_gemini(prompt: str, model_name: str = "gemini-2.5-flash") -> str:
+    """
+    Simple text-in / text-out Gemini call. Returns the raw response string.
+    Used by modules like presage_readiness that handle JSON parsing themselves.
+    """
+    model = genai.GenerativeModel(
+        model_name=model_name,
+        generation_config=genai.types.GenerationConfig(temperature=0.2),
+        safety_settings=SAFETY_SETTINGS,
+    )
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"call_gemini failed: {e}")
+        raise
+
+
 def get_video_model(model_name: str = "gemini-2.5-pro") -> genai.GenerativeModel:
     """Returns a model configured for video/multimodal understanding."""
     return genai.GenerativeModel(
         model_name=model_name,
         generation_config=genai.types.GenerationConfig(
-            temperature=0.2, # Slightly higher for nuanced video analysis, but still low
+            temperature=0.2,
             response_mime_type="application/json",
         ),
         safety_settings=SAFETY_SETTINGS,

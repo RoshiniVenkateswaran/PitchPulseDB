@@ -45,6 +45,7 @@ PLAYER CONTEXT:
 - ACWR: {player_context.get('acwr', 'N/A')}
 
 VITALS FROM PRESAGE SDK (selfie scan):
+- Face Detected: {vitals.get('face_detected', 'true')}
 - Pulse Rate: {vitals.get('pulse_rate', 'N/A')} bpm
 - HRV: {vitals.get('hrv_ms', 'N/A')} ms
 - Breathing Rate: {vitals.get('breathing_rate', 'N/A')} breaths/min
@@ -53,12 +54,19 @@ VITALS FROM PRESAGE SDK (selfie scan):
 - Valence: {vitals.get('valence', 'N/A')}
 - Confidence: {vitals.get('confidence', 'N/A')}
 
+RULES:
+1. If "Face Detected" is false or "no", immediately return:
+   readiness_flag: "ALERT", readiness_delta: 0, emotional_state: "No face detected", recommendation: "Please retake the selfie scan."
+2. If the data indicates positive/high energy (e.g. happy, active, high valence, normal stress), provide a positive readiness_delta (e.g., +5 to +10) and flag "OK".
+3. If the data indicates negative/low energy (e.g. sad, dull, high stress, low valence), provide a negative readiness_delta (e.g., -5 to -15) and flag "CAUTION" or "ALERT".
+4. The emotional_state should be a descriptive word (e.g., "Active", "Dull", "Happy", "Sad", "Stressed", "Calm").
+
 Respond ONLY with valid JSON:
 {{
   "readiness_delta": <integer, how much to adjust readiness score, e.g. -15 or +5>,
   "readiness_flag": "<OK | CAUTION | ALERT>",
-  "emotional_state": "<Calm | Focused | Anxious | Stressed | Fatigued>",
-  "contributing_factors": ["<factor 1>", "<factor 2>", "<factor 3>"],
+  "emotional_state": "<Active | Dull | Happy | Sad | Stressed | Calm | No face detected>",
+  "contributing_factors": ["<factor 1>", "<factor 2>"],
   "recommendation": "<one-sentence coaching recommendation>"
 }}"""
 
@@ -78,39 +86,68 @@ Respond ONLY with valid JSON:
 
 def _presage_mock(player_context: dict, vitals: dict) -> dict:
     """Deterministic fallback when Gemini is unavailable."""
-    stress = vitals.get("stress_level", "Normal")
+    # Check for face detection explicitly
+    face_detected = vitals.get("face_detected", True)
+    if str(face_detected).lower() in ("false", "no", "0"):
+        return {
+            "readiness_delta": 0,
+            "readiness_flag": "ALERT",
+            "emotional_state": "No face detected",
+            "contributing_factors": ["Scan failed to detect a human face."],
+            "recommendation": "Please ensure you are in a well-lit area and retake the scan."
+        }
+
+    stress = str(vitals.get("stress_level", "Normal")).lower()
+    focus = str(vitals.get("focus", "High")).lower()
+    valence = str(vitals.get("valence", "Positive")).lower()
     pulse = vitals.get("pulse_rate", 70)
     hrv = vitals.get("hrv_ms", 60)
 
     factors = []
     delta = 0
+    emotional = "Calm"
 
+    # Evaluate physical markers
     if isinstance(pulse, (int, float)) and pulse > 85:
-        factors.append(f"Resting HR elevated at {pulse}bpm (above 80bpm baseline).")
-        delta -= 8
-    if isinstance(hrv, (int, float)) and hrv < 45:
-        factors.append(f"HRV suppressed at {hrv}ms (below 50ms baseline).")
-        delta -= 7
-    if str(stress).lower() in ("high", "very high"):
-        factors.append("High psychological stress detected in facial scan.")
+        factors.append(f"Resting HR elevated at {pulse}bpm.")
         delta -= 5
+    if isinstance(hrv, (int, float)) and hrv < 45:
+        factors.append(f"HRV suppressed at {hrv}ms.")
+        delta -= 5
+
+    # Evaluate emotional markers strongly
+    if valence == "positive" and stress == "normal":
+        if focus == "high":
+            emotional = "Active"
+            delta += 10
+            factors.append("High focus and positive valence detected. Optimal state.")
+        else:
+            emotional = "Happy"
+            delta += 5
+            factors.append("Positive emotional state detected.")
+    elif valence == "negative" or stress in ("high", "very high"):
+        if focus == "low":
+            emotional = "Dull"
+            delta -= 10
+            factors.append("Low focus and negative valence detected. Reduced cognitive readiness.")
+        else:
+            emotional = "Sad" # Or stressed
+            delta -= 8
+            factors.append("Negative emotional state or high stress detected.")
 
     if not factors:
         factors = ["All vitals within normal range."]
         delta = 0
 
-    if delta <= -10:
-        flag = "ALERT"
-        emotional = "Stressed"
-        rec = "Reduce training load and prioritize mental recovery."
+    if delta <= -8:
+        flag = "ALERT" if stress in ("high", "very high") else "CAUTION"
+        rec = "Consider reducing training intensity today to allow for mental and physical recovery."
     elif delta < 0:
         flag = "CAUTION"
-        emotional = "Fatigued"
-        rec = "Monitor closely during session; consider lighter drills."
+        rec = "Monitor closely during the session; player may be fatigued or distracted."
     else:
         flag = "OK"
-        emotional = "Calm"
-        rec = "Player is cleared for full training."
+        rec = "Player is clear for full training load. State is optimal."
 
     return {
         "readiness_delta": delta,

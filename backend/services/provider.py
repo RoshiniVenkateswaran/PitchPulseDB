@@ -33,6 +33,10 @@ class ProviderAdapter(ABC):
     def get_fixture_player_stats(self, fixture_id: int) -> List[Dict[str, Any]]:
         pass
 
+    @abstractmethod
+    def get_player_season_stats(self, player_id: int, season: int = 2024) -> Dict[str, Any]:
+        pass
+
 
 class LiveFootballProvider(ProviderAdapter):
     """
@@ -138,6 +142,45 @@ class LiveFootballProvider(ProviderAdapter):
                 })
         return result
 
+    def get_player_season_stats(self, player_id: int, season: int = 2024) -> Dict[str, Any]:
+        """Fetch a player's season statistics from API-Football."""
+        data = self._get("players", {"id": player_id, "season": season})
+        stats_out = {
+            "total_minutes": 0, "appearances": 0,
+            "avg_rating": None, "goals": 0, "assists": 0
+        }
+        try:
+            resp = data.get("response", [])
+            if not resp:
+                return stats_out
+            stats_list = resp[0].get("statistics", [])
+            if not stats_list:
+                return stats_out
+            # Aggregate across all competition entries
+            total_rating = 0.0
+            rating_count = 0
+            for s in stats_list:
+                games = s.get("games", {})
+                goals_data = s.get("goals", {})
+                apps = games.get("appearences") or 0  # API-Football typo is intentional
+                mins = games.get("minutes") or 0
+                rating_str = games.get("rating")
+                stats_out["appearances"] += apps
+                stats_out["total_minutes"] += mins
+                stats_out["goals"] += goals_data.get("total") or 0
+                stats_out["assists"] += goals_data.get("assists") or 0
+                if rating_str:
+                    try:
+                        total_rating += float(rating_str)
+                        rating_count += 1
+                    except (ValueError, TypeError):
+                        pass
+            if rating_count > 0:
+                stats_out["avg_rating"] = round(total_rating / rating_count, 2)
+        except Exception as e:
+            logger.warning(f"Failed to parse season stats for player {player_id}: {e}")
+        return stats_out
+
 
 class MockFootballProvider(ProviderAdapter):
     """
@@ -173,6 +216,23 @@ class MockFootballProvider(ProviderAdapter):
 
     def get_fixture_player_stats(self, fixture_id: int) -> List[Dict[str, Any]]:
         return self._load_json(f"stats_{fixture_id}.json")
+
+    def get_player_season_stats(self, player_id: int, season: int = 2024) -> Dict[str, Any]:
+        """Mock: return varied stats based on player_id for demo variety."""
+        import random
+        rng = random.Random(player_id)  # deterministic per player
+        apps = rng.randint(5, 38)
+        mins = apps * rng.randint(55, 90)
+        rating = round(rng.uniform(6.2, 8.0), 2)
+        goals = rng.randint(0, 15)
+        assists = rng.randint(0, 10)
+        return {
+            "total_minutes": mins,
+            "appearances": apps,
+            "avg_rating": rating,
+            "goals": goals,
+            "assists": assists,
+        }
 
 
 def _build_provider() -> ProviderAdapter:
