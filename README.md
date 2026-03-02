@@ -3,15 +3,18 @@
 ## Overview
 This is the backend for **PitchPulse — Club Readiness & Injury Risk Triage**. It is built with FastAPI, uses PostgreSQL for the core database, and integrates with Actian VectorAI DB for semantic search and AI RAG pipelines.
 
-## Hackathon Deployment (Vultr + Docker Compose)
+## Running Locally
 
-1. **Prerequisites**: Ensure Docker and Docker Compose are installed on your Vultr instance.
-2. **Environment Variables**: Create a `.env` file in this directory based on `.env.example`.
-3. **Start the Services**:
+1. **Environment Variables**: Create a `.env` file in this directory based on `.env.example`.
+2. **Install Dependencies**:
    ```bash
-   docker-compose up -d --build
+   pip install -r requirements.txt
    ```
-4. **Access the API**: The API will be available at `http://<your-vultr-ip>:8000`.
+3. **Start the Server**:
+   ```bash
+   uvicorn backend.main:app --host 0.0.0.0 --port 8765
+   ```
+4. **Access the API**: The API will be available at `http://localhost:8765`.
 
 ## Key Demo Endpoints
 
